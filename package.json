@@ -1,0 +1,23 @@
+{
+  "name": "armenian-soccer-tournament",
+  "version": "1.0.0",
+  "description": "Armenian Soccer Tournament Statistics Website",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "serve": "http-server -p 8000 -o"
+  },
+  "keywords": [
+    "soccer",
+    "tournament",
+    "armenian",
+    "statistics",
+    "sports"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
+
