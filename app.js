@@ -492,27 +492,74 @@ function parseSheet(sheet, sheetName) {
     // Parse matches - try different row ranges
     console.log('\nLooking for matches...');
     for (let startRow = 10; startRow <= 15; startRow++) {
-        if (data[startRow] && data[startRow][0] && String(data[startRow][0]).toLowerCase().includes('round')) {
+        if (!data[startRow]) continue;
+
+        // Check if any cell in this row contains "round" text
+        const hasRoundHeader = data[startRow].some(cell =>
+            cell && String(cell).toLowerCase().includes('round')
+        );
+
+        if (hasRoundHeader) {
             console.log(`Found ROUND at row ${startRow} (Excel row ${startRow+1})`);
-            // Matches should be in the next rows
-            for (let rowIdx = startRow + 1; rowIdx <= startRow + 6; rowIdx++) {
-                if (!data[rowIdx]) continue;
+            console.log(`  Header row content:`, data[startRow].slice(0, 10));
 
-                const row = data[rowIdx];
-                const home = row[0] ? String(row[0]).trim() : '';
-                const away = row[1] ? String(row[1]).trim() : '';
-
-                console.log(`  Row ${rowIdx}: home="${home}", away="${away}"`);
-
-                // Skip if no valid team names or if it's header text
-                if (!home || !away || home.toLowerCase().includes('round') || away.toLowerCase().includes('round')) {
+            // Matches should be in the next rows - read ALL matches until we hit empty rows or standings
+            let emptyRowCount = 0;
+            for (let rowIdx = startRow + 1; rowIdx < data.length && emptyRowCount < 3; rowIdx++) {
+                if (!data[rowIdx]) {
+                    emptyRowCount++;
                     continue;
                 }
 
-                const homeScore = row[2];
-                const awayScore = row[4];
+                const row = data[rowIdx];
+                // New format: Location | Time | Home | Away | HomeScore | : | AwayScore
+                const location = row[0] ? String(row[0]).trim() : '';
+                const time = row[1] ? String(row[1]).trim() : '';
+                const home = row[2] ? String(row[2]).trim() : '';
+                const away = row[3] ? String(row[3]).trim() : '';
+
+                // DEBUG: Show first 8 columns of this row
+                console.log(`  Row ${rowIdx} data:`, row.slice(0, 8).map((cell, idx) =>
+                    `[${idx}]="${cell === null || cell === undefined || cell === '' ? '-' : cell}"`
+                ).join(' '));
+
+                // Stop if we hit the standings section - but ONLY if GP/PTS is in the FIRST 4 columns
+                // (matches can have standings headers in later columns)
+                const firstFourCells = row.slice(0, 4);
+                const hasStandingsHeaderInMatchArea = firstFourCells.some(cell =>
+                    cell && (String(cell).trim() === 'GP' || String(cell).trim() === 'PTS')
+                );
+                if (hasStandingsHeaderInMatchArea) {
+                    console.log(`  Stopped at row ${rowIdx}: Found standings section in first 4 columns`);
+                    break;
+                }
+
+                console.log(`  Row ${rowIdx}: location="${location}", time="${time}", home="${home}", away="${away}"`);
+
+                // Check if this is a completely empty row (no data in first 4 columns)
+                const isCompletelyEmpty = !location && !time && !home && !away;
+                if (isCompletelyEmpty) {
+                    emptyRowCount++;
+                    console.log(`    Empty row detected (${emptyRowCount}/3)`);
+                    continue;
+                }
+
+                // Reset empty row counter when we find any data
+                emptyRowCount = 0;
+
+                // Skip if no valid team names or if it's header text
+                if (!home || !away || home.toLowerCase().includes('round') || away.toLowerCase().includes('round')) {
+                    console.log(`    Skipped: missing team names or header row`);
+                    continue;
+                }
+
+
+                const homeScore = row[4];
+                const awayScore = row[6];
 
                 const match = {
+                    location: location,
+                    time: time,
                     home: home,
                     away: away,
                     homeScore: (homeScore !== undefined && homeScore !== null && homeScore !== '') ? homeScore : '-',
@@ -520,10 +567,84 @@ function parseSheet(sheet, sheetName) {
                 };
 
                 result.matches.push(match);
-                console.log(`    ✓ Match: ${home} ${match.homeScore} : ${match.awayScore} ${away}`);
+                console.log(`    ✓ Match: ${location} ${time} - ${home} ${match.homeScore} : ${match.awayScore} ${away}`);
             }
             break;
         }
+    }
+
+    // If no matches found yet, try alternate approach - look for actual match data patterns
+    if (result.matches.length === 0) {
+        console.log('\n⚠️ No ROUND header found, trying alternate match detection...');
+        let emptyRowCount = 0;
+        for (let rowIdx = 11; rowIdx < Math.min(data.length, 50) && emptyRowCount < 3; rowIdx++) {
+            if (!data[rowIdx]) {
+                emptyRowCount++;
+                continue;
+            }
+
+            const row = data[rowIdx];
+            const col0 = row[0] ? String(row[0]).trim() : '';
+            const col1 = row[1] ? String(row[1]).trim() : '';
+            const col2 = row[2] ? String(row[2]).trim() : '';
+            const col3 = row[3] ? String(row[3]).trim() : '';
+            const col4 = row[4] ? String(row[4]).trim() : '';
+            const col5 = row[5] ? String(row[5]).trim() : '';
+            const col6 = row[6] ? String(row[6]).trim() : '';
+
+            // Stop if we hit the standings section - but ONLY if GP/PTS is in the FIRST 4 columns
+            const firstFourCells = row.slice(0, 4);
+            const hasStandingsHeaderInMatchArea = firstFourCells.some(cell =>
+                cell && (String(cell).trim() === 'GP' || String(cell).trim() === 'PTS')
+            );
+            if (hasStandingsHeaderInMatchArea) {
+                console.log(`  Stopped at row ${rowIdx}: Found standings section in first 4 columns`);
+                break;
+            }
+
+            // Check if this looks like a match row:
+            // Option 1: Has location, time, both teams, AND colon in column 5
+            // Option 2: Has location, time, both teams, AND scores in columns 4 and 6
+            const hasColon = col5 === ':' || col5.includes(':');
+            const hasScores = (col4 !== '' && col4 !== '-') || (col6 !== '' && col6 !== '-');
+            const looksLikeMatch = col0 && col1 && col2 && col3 && (hasColon || hasScores);
+
+            console.log(`  Row ${rowIdx} check: loc="${col0 ? '✓' : '✗'}" time="${col1 ? '✓' : '✗'}" home="${col2 ? '✓' : '✗'}" away="${col3 ? '✓' : '✗'}" col5="${col5}" hasColon=${hasColon} hasScores=${hasScores} → looksLikeMatch=${looksLikeMatch}`);
+
+            if (looksLikeMatch && !col2.toLowerCase().includes('home team') && !col2.toLowerCase().includes('locatie') && !col2.toLowerCase().includes('round')) {
+                console.log(`  ✅ Found match at row ${rowIdx}: ${col0} | ${col1} | ${col2} vs ${col3}`);
+                emptyRowCount = 0; // Reset counter when we find a match
+
+                const match = {
+                    location: col0,
+                    time: col1,
+                    home: col2,
+                    away: col3,
+                    homeScore: (row[4] !== undefined && row[4] !== null && row[4] !== '') ? row[4] : '-',
+                    awayScore: (row[6] !== undefined && row[6] !== null && row[6] !== '') ? row[6] : '-'
+                };
+
+                result.matches.push(match);
+                console.log(`    ✓ Added: ${match.location} ${match.time} - ${match.home} ${match.homeScore} : ${match.awayScore} ${match.away}`);
+            } else {
+                if (!looksLikeMatch) {
+                    console.log(`    ⏭️ Skipped: doesn't look like match (missing data or no colon)`);
+                } else if (col2.toLowerCase().includes('home team') || col2.toLowerCase().includes('locatie') || col2.toLowerCase().includes('round')) {
+                    console.log(`    ⏭️ Skipped: header row detected (col2="${col2}")`);
+                }
+
+                // Only count as empty if there's no data in first 4 columns
+                if (!col0 && !col1 && !col2 && !col3) {
+                    emptyRowCount++;
+                    console.log(`    Empty row (${emptyRowCount}/3)`);
+                }
+            }
+        }
+    }
+
+    console.log(`\n📊 Match parsing complete: Found ${result.matches.length} matches`);
+    if (result.matches.length > 0) {
+        console.log('Matches:', result.matches.map(m => `${m.home} vs ${m.away}`).join(', '));
     }
 
     // Parse standings - look for GP, W, D, L headers
@@ -913,9 +1034,14 @@ function createStandingsSection(data) {
 }
 
 function createMatchesSection(data) {
+    console.log(`🏟️ createMatchesSection called for "${data.name}": ${data.matches.length} matches`);
+
     if (data.matches.length === 0) {
+        console.log(`  ⚠️ No matches to display for ${data.name}`);
         return '';
     }
+
+    console.log(`  ✅ Displaying ${data.matches.length} matches`);
 
     let html = `
         <div class="section">
@@ -923,6 +1049,8 @@ function createMatchesSection(data) {
             <table class="matches-table">
                 <thead>
                     <tr>
+                        <th>Location</th>
+                        <th>Time</th>
                         <th>Home</th>
                         <th>Score</th>
                         <th>Away</th>
@@ -932,12 +1060,17 @@ function createMatchesSection(data) {
     `;
 
     data.matches.forEach(match => {
-        const score = match.homeScore === '-'
-            ? 'vs'
-            : `${match.homeScore} : ${match.awayScore}`;
+        // Only show score if match has been played (has actual score values)
+        const hasScore = match.homeScore !== '-' && match.homeScore !== '' &&
+                        match.awayScore !== '-' && match.awayScore !== '';
+        const score = hasScore
+            ? `${match.homeScore} : ${match.awayScore}`
+            : 'vs';
 
         html += `
             <tr>
+                <td>${match.location || '-'}</td>
+                <td>${match.time || '-'}</td>
                 <td class="team-name">${match.home}</td>
                 <td class="match-score">${score}</td>
                 <td class="team-name">${match.away}</td>
