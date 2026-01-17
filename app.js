@@ -220,7 +220,7 @@ function parsePlayoffsSheet(sheet) {
         const away = row[1] ? String(row[1]).trim() : '';
         const sep = row[3] ? String(row[3]).trim() : '';
 
-        if (home && away && sep === ':' && !home.toLowerCase().includes('home')) {
+        if (home && away && sep === ':' && !home.toLowerCase().includes('home team')) {
             const homeScoreRaw = row[2];
             const awayScoreRaw = row[4];
             const homeScore = homeScoreRaw !== undefined && homeScoreRaw !== '' ? String(homeScoreRaw).trim() : '-';
